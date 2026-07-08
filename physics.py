@@ -116,24 +116,26 @@ class SoftBodySimulation:
     def update(self, dt, snn):
         self.time += dt
 
-        # 1. Gather sensor data (Percentage Deformation of each spring)
+        # 1. Gather sensor data (Bias + Springs)
         num_springs = len(self.springs)
         sensor_data = np.zeros(snn.N)
+        sensor_data[0] = 10.0 # Bias Node acts as a constant CPG
+        
         for i, spring in enumerate(self.springs):
             dx = spring.m2.x - spring.m1.x
             dy = spring.m2.y - spring.m1.y
             dist = math.sqrt(dx**2 + dy**2)
             # % deformation
             ratio = abs(dist - spring.base_reset_length) / spring.base_reset_length
-            sensor_data[i] = ratio * 10.0 # Scaling factor
+            sensor_data[i + 1] = ratio * 10.0 # Scaling factor reverted
 
         # 2. Step the brain forward
         spike_signals = snn.step(inputs=sensor_data)
 
         # 3. Apply outputs to muscles
-        # Outputs are indexed immediately after the inputs (0 to num_springs-1)
+        # Outputs are indexed after Bias(1) + Inputs(num_springs)
         for i in range(num_springs):
-            output_idx = num_springs + i
+            output_idx = 1 + num_springs + i
             if output_idx < len(spike_signals) and spike_signals[output_idx] == 1.0:
                 self.springs[i].activation = 1.0
 

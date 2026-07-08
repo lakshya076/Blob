@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 import os
 import sys
+import shutil
 from physics import SoftBodySimulation
 from evolution import Population
 import multiprocessing
@@ -21,8 +22,15 @@ def evaluate_genome(genome):
     for _ in range(ticks):
         sim.update(PHYSICS_DT, brain)
         
+    # 4. Track ending center of mass
     end_x = np.mean([m.x for m in sim.masses])
-    return end_x - start_x
+    
+    # 5. Fitness is distance traveled MINUS an energy penalty
+    # This prevents the "screaming network" local minima
+    total_spikes = np.sum(brain.buffer)
+    distance = end_x - start_x
+    fitness = distance - (total_spikes * 0.0005)
+    return fitness, distance
 
 def train_mode():
     dummy_sim = SoftBodySimulation()
@@ -42,20 +50,27 @@ def train_mode():
     pop = Population(POPULATION_SIZE, num_inputs, num_outputs)
 
     pool = multiprocessing.Pool()
-    os.makedirs("saved_brains", exist_ok=True)
+    
+    if os.path.exists("saved_brains"):
+        shutil.rmtree("saved_brains")
+    os.makedirs("saved_brains")
 
     for gen in range(GENERATIONS):
         print(f"\n--- Generation {gen+1} ---")
         start_time = time.time()
         
-        fitness_scores = pool.map(evaluate_genome, pop.genomes)
+        results = pool.map(evaluate_genome, pop.genomes)
+        
+        fitness_scores = [r[0] for r in results]
+        distances = [r[1] for r in results]
         
         best_idx = np.argmax(fitness_scores)
         best_fitness = fitness_scores[best_idx]
+        best_distance = distances[best_idx]
         best_genome = pop.genomes[best_idx]
         avg_fitness = np.mean(fitness_scores)
         
-        print(f"Best Fitness: {best_fitness:.4f}")
+        print(f"Best Fitness: {best_fitness:.4f} (Distance: {best_distance:.4f})")
         print(f"Avg Fitness: {avg_fitness:.4f}")
         print(f"Time Taken: {time.time() - start_time:.2f}s")
         
@@ -116,7 +131,7 @@ def replay_mode():
 
     # --- Pre-calculate SNN visual layout ---
     node_positions = []
-    num_inputs = len(sim.springs)
+    num_inputs = len(sim.springs) + 1 # +1 for the Bias Node
     num_outputs = len(sim.springs)
     num_hidden = brain.N - num_inputs - num_outputs
     
