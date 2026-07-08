@@ -24,40 +24,51 @@ Because SNN spikes are non-differentiable (they are instant events), we cannot e
 
 ## 2. Distribution of Work
 
-The project is divided into four strict modules to allow two developers to work simultaneously. 
+The project is divided into three strict modules to allow developers to work in parallel on the core components before integrating them together.
 
-### Developer A: The Simulator (Physics & SNN)
-**Files:** `physics.py` and `snn.py`
+### Developer A: The Physics Engine
+**Files:** `physics.py`
 **Responsibilities:**
 1. Build the mass-spring-damper physics engine using Semi-Implicit Euler integration.
 2. Implement ground collision and friction logic.
-3. Build the LIF neuron update loop and synaptic delay buffer.
-4. Hook the SNN output spikes to the spring resting lengths.
-5. Create a basic visualizer (e.g., Pygame) to see the body move.
+3. Hook a mock SNN to the spring resting lengths to ensure actuation translates to physical movement.
+4. Create a Pygame visualizer to see the body move in real-time.
 
-### Developer B: The Optimizer (GA & Multiprocessing)
+### Developer B: The Spiking Neural Network
+**Files:** `snn.py`
+**Responsibilities:**
+1. Build the LIF neuron update loop and synaptic delay buffer.
+2. Handle the forward-pass execution of the network over time.
+3. Build a mock physics environment that feeds dummy sensor data (e.g., ground contact) into the SNN to verify that the neurons process inputs and fire expected outputs.
+
+### Developer C (or Phase 2): The Optimizer & Integration
 **Files:** `evolution.py` and `main.py`
 **Responsibilities:**
 1. Define the genome structure (a Python dictionary representing nodes and synapses).
 2. Write the GA operations: tournament selection, crossover (swapping sub-graphs), and mutation (altering weights/delays).
 3. Build the master loop in `main.py` that orchestrates generations.
-4. Implement Python's `multiprocessing.Pool` so the population is evaluated in parallel across all CPU cores.
+4. Implement Python's `multiprocessing.Pool` so the population is evaluated in parallel.
+5. **Integration:** Replace the mock SNN and mock Physics with the real implementations, tying the SNN outputs to the spring actuators and the physics sensors to the SNN inputs.
 
 ---
 
 ## 3. How to Achieve Zero-Blocking Parallel Development
 
-To ensure both developers can work and test their code without waiting for the other to finish, you must use **Mock Stubs** inside your isolated testing blocks (`if __name__ == '__main__':`).
+To ensure developers can work and test their code without waiting for others to finish, you must use **Mock Stubs** inside your isolated testing blocks (`if __name__ == '__main__':`).
 
-### Developer A's Isolated Testing
+### Developer A's Isolated Testing (Physics)
 Developer A cannot test if their physics engine works until the SNN is built. 
 **The Solution:** At the bottom of `physics.py`, create a `MockSpikingNeuralNetwork` that simply outputs a hardcoded alternating boolean pattern (e.g., using `math.sin(time)`). 
 Developer A can run `python physics.py` standalone. The mock SNN will actuate the springs rhythmically, allowing Developer A to visually verify that contractions lead to movement and that the physics don't explode.
 
-### Developer B's Isolated Testing
-Developer B cannot test if the GA optimizes anything until the physics engine is built.
+### Developer B's Isolated Testing (SNN)
+Developer B cannot test if the network behaves properly without physical sensor inputs.
+**The Solution:** Inside `snn.py`, create a `MockPhysicsEnvironment`. This mock feeds rhythmic dummy data (like an alternating `1` and `0` to simulate feet touching the ground) into the SNN. Developer B can run `python snn.py` standalone and plot/print the output spikes to ensure the Central Pattern Generator forms stable rhythms.
+
+### Developer C's Isolated Testing (GA)
+Developer C cannot test if the GA optimizes anything until the physics engine is built.
 **The Solution:** Inside `main.py`, create a `MockSoftBodySimulation`. Instead of running physics, this mock class simply sums up all the "weights" inside the SNN genome and returns that as the fitness score.
-Developer B can run `python main.py` standalone. The GA will naturally select and mutate genomes to maximize the weights. Developer B can verify that the multiprocessing pool is stable and the average fitness goes up every generation.
+Developer C can run `python main.py` standalone. The GA will naturally select and mutate genomes to maximize the weights, proving the multiprocessing pool and evolutionary operators work correctly.
 
 ---
 
