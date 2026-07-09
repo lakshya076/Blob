@@ -64,7 +64,7 @@ class Genome:
                     innov_id = tracker.get_innov_id(in_id, out_id)
                     self.connections.append(ConnectionGene(in_id, out_id, weight, delay, innov_id))
 
-    def distance(self, other):
+    def distance(self, other, c1=1.0, c2=1.0, c3=0.4):
         # Calculates genetic distance for Speciation
         p1 = {c.innov_id: c for c in self.connections if c.enabled}
         p2 = {c.innov_id: c for c in other.connections if c.enabled}
@@ -91,12 +91,12 @@ class Genome:
         N = max(len(p1), len(p2))
         if N < 20: N = 1 # Normalize for small genomes
         
-        return (1.0 * excess / N) + (1.0 * disjoint / N) + (0.4 * (weight_diff / max(1, matching)))
+        return (c1 * excess / N) + (c2 * disjoint / N) + (c3 * (weight_diff / max(1, matching)))
 
-    def mutate_weight(self):
+    def mutate_weight(self, power=0.5):
         if not self.connections: return
         conn = random.choice(self.connections)
-        conn.weight += random.uniform(-0.5, 0.5)
+        conn.weight += random.uniform(-power, power)
         conn.weight = max(-1.0, min(1.0, conn.weight))
 
     def mutate_delay(self, max_delay):
@@ -133,7 +133,7 @@ class Genome:
         self.connections.append(ConnectionGene(conn.in_node, new_id, 1.0, 1, i1))
         self.connections.append(ConnectionGene(new_id, conn.out_node, conn.weight, conn.delay, i2))
 
-    def build_phenotype(self):
+    def build_phenotype(self, leak_factor=0.9, threshold=1.0, max_biological_delay=0.5):
         total = len(self.nodes)
         weights = np.zeros((total, total))
         delays = np.ones((total, total), dtype=int)
@@ -145,7 +145,7 @@ class Genome:
                 r, col = node_map[c.in_node], node_map[c.out_node]
                 weights[r, col] = c.weight
                 delays[r, col] = c.delay
-        return SpikingNetwork(weights=weights, delays=delays)
+        return SpikingNetwork(weights=weights, delays=delays, leak_factor=leak_factor, threshold=threshold, max_biological_delay=max_biological_delay)
 
 def crossover(p1, p2):
     child = Genome(0, 0, init_connections=False)
@@ -178,14 +178,17 @@ class Population:
         self.genomes = [Genome(num_inputs, num_outputs) for _ in range(size)]
         self.species = []
         
-    def evolve(self, fitness_scores, max_delay):
+    def evolve(self, fitness_scores, max_delay, mut_rates=None, compat_thresh=3.0, c1=1.0, c2=1.0, c3=0.4, weight_power=0.5):
+        if mut_rates is None:
+            mut_rates = {'weight': 0.8, 'delay': 0.8, 'add_conn': 0.1, 'add_node': 0.05}
+            
         # 1. Speciate the population
         self.species = []
         for g, f in zip(self.genomes, fitness_scores):
             g.fitness = f
             placed = False
             for s in self.species:
-                if g.distance(s.rep) < 3.0: # Compatibility threshold
+                if g.distance(s.rep, c1=c1, c2=c2, c3=c3) < compat_thresh: # Compatibility threshold
                     s.members.append(g)
                     placed = True
                     break
@@ -228,10 +231,10 @@ class Population:
             child = crossover(p1, p2)
             
             # Mutations
-            if random.random() < 0.8: child.mutate_weight()
-            if random.random() < 0.8: child.mutate_delay(max_delay)
-            if random.random() < 0.1: child.mutate_add_connection(max_delay)
-            if random.random() < 0.05: child.mutate_add_node()
+            if random.random() < mut_rates['weight']: child.mutate_weight(power=weight_power)
+            if random.random() < mut_rates['delay']: child.mutate_delay(max_delay)
+            if random.random() < mut_rates['add_conn']: child.mutate_add_connection(max_delay)
+            if random.random() < mut_rates['add_node']: child.mutate_add_node()
             new_pop.append(child)
             
         self.genomes = new_pop

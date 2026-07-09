@@ -6,15 +6,16 @@ import sys
 import shutil
 from physics import SoftBodySimulation
 from evolution import Population
+from hyperparameters import *
 import multiprocessing
 
 # Simulation time in seconds
 SIMULATION_TIME = 5.0
 PHYSICS_DT = 0.016 # ~60 fps
 
-def evaluate_genome(genome):
+def evaluate_genome(genome, leak_factor=0.9, threshold=1.0, energy_penalty=0.0005, max_biological_delay=0.5):
     # This function evaluates a single brain's fitness
-    brain = genome.build_phenotype()
+    brain = genome.build_phenotype(leak_factor=leak_factor, threshold=threshold, max_biological_delay=max_biological_delay)
     sim = SoftBodySimulation()
     start_x = np.mean([m.x for m in sim.masses])
     
@@ -29,7 +30,7 @@ def evaluate_genome(genome):
     # This prevents the "screaming network" local minima
     total_spikes = np.sum(brain.buffer)
     distance = end_x - start_x
-    fitness = distance - (total_spikes * 0.0005)
+    fitness = distance - (total_spikes * energy_penalty)
     return fitness, distance
 
 def train_mode():
@@ -44,7 +45,7 @@ def train_mode():
     
     gen_input = input("Enter Number of Generations [default 100]: ")
     GENERATIONS = int(gen_input) if gen_input.isdigit() else 100
-    MAX_DELAY = int(0.5 / PHYSICS_DT) # Max biological delay of 0.5s
+    MAX_DELAY = int(MAX_BIOLOGICAL_DELAY / PHYSICS_DT) # Use centralized setting # Max biological delay of 0.5s
 
     print(f"Initializing Population of {POPULATION_SIZE} with {num_inputs} Inputs and {num_outputs} Outputs...")
     pop = Population(POPULATION_SIZE, num_inputs, num_outputs)
@@ -59,7 +60,9 @@ def train_mode():
         print(f"\n--- Generation {gen+1} ---")
         start_time = time.time()
         
-        results = pool.map(evaluate_genome, pop.genomes)
+        # Evaluate using our centralized hyperparameters
+        args_list = [(g, LEAK_FACTOR, THRESHOLD, ENERGY_PENALTY, MAX_BIOLOGICAL_DELAY) for g in pop.genomes]
+        results = pool.starmap(evaluate_genome, args_list)
         
         fitness_scores = [r[0] for r in results]
         distances = [r[1] for r in results]
@@ -80,8 +83,15 @@ def train_mode():
             
         print(f"Saved Best Brain to saved_brains/gen_{gen+1}.pkl")
         
-        # Breed the next generation
-        pop.evolve(fitness_scores, MAX_DELAY)
+        # Breed the next generation using our centralized hyperparameters
+        pop.evolve(
+            fitness_scores, 
+            MAX_DELAY,
+            mut_rates=MUTATION_RATES,
+            compat_thresh=COMPATIBILITY_THRESHOLD,
+            c1=C1, c2=C2, c3=C3,
+            weight_power=WEIGHT_MUTATION_POWER
+        )
 
     print("\nEvolution Complete!")
 
@@ -115,8 +125,8 @@ def replay_mode():
     with open(path, "rb") as f:
         best_genome = pickle.load(f)
 
-    # Compile the brain
-    brain = best_genome.build_phenotype()
+    # Compile the brain using the current hyperparameters
+    brain = best_genome.build_phenotype(leak_factor=LEAK_FACTOR, threshold=THRESHOLD, max_biological_delay=MAX_BIOLOGICAL_DELAY)
     sim = SoftBodySimulation()
 
     import pygame

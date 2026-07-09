@@ -4,22 +4,23 @@ dt = 0.1
 
 class SpikingNetwork:
 
-    def __init__(self, weights, delays):
+    def __init__(self, weights, delays, dt=0.016, leak_factor=0.9, threshold=1.0, max_biological_delay=0.5):
 
         self.weights = weights
         self.delays = delays
-        self.leak_factor = 0.9
-        self.threshold = 1.0
+        self.leak_factor = leak_factor
+        self.threshold = threshold
 
-        self.N = weights.shape[0]
-        self.V = np.zeros(self.N)
+        self.N = weights.shape[0] # Number of neurons
 
-        max_biological_delay = 0.5 # Time it takes for a signal to transfer from one end of the network to another
         self.T_max = int(max_biological_delay / dt)
 
         self.buffer = np.zeros((self.T_max, self.N))
 
         self.time_pointer = 0
+        
+        # Neuron membrane potentials
+        self.V = np.zeros(self.N)
 
     def step(self, inputs):
 
