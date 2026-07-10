@@ -13,9 +13,9 @@ import multiprocessing
 SIMULATION_TIME = 5.0
 PHYSICS_DT = 0.016 # ~60 fps
 
-def evaluate_genome(genome, leak_factor=0.9, threshold=1.0, energy_penalty=0.0005, max_biological_delay=0.5):
+def evaluate_genome(genome, leak_factor=0.9, threshold=1.0, max_biological_delay=0.5, refractory_period=0.05):
     # This function evaluates a single brain's fitness
-    brain = genome.build_phenotype(leak_factor=leak_factor, threshold=threshold, max_biological_delay=max_biological_delay)
+    brain = genome.build_phenotype(leak_factor=leak_factor, threshold=threshold, max_biological_delay=max_biological_delay, refractory_period=refractory_period)
     sim = SoftBodySimulation()
     start_x = np.mean([m.x for m in sim.masses])
     
@@ -26,11 +26,9 @@ def evaluate_genome(genome, leak_factor=0.9, threshold=1.0, energy_penalty=0.000
     # 4. Track ending center of mass
     end_x = np.mean([m.x for m in sim.masses])
     
-    # 5. Fitness is distance traveled MINUS an energy penalty
-    # This prevents the "screaming network" local minima
-    total_spikes = np.sum(brain.buffer)
+    # 5. Fitness is distance traveled
     distance = end_x - start_x
-    fitness = distance - (total_spikes * energy_penalty)
+    fitness = distance
     return fitness, distance
 
 def train_mode():
@@ -61,7 +59,7 @@ def train_mode():
         start_time = time.time()
         
         # Evaluate using our centralized hyperparameters
-        args_list = [(g, LEAK_FACTOR, THRESHOLD, ENERGY_PENALTY, MAX_BIOLOGICAL_DELAY) for g in pop.genomes]
+        args_list = [(g, LEAK_FACTOR, THRESHOLD, MAX_BIOLOGICAL_DELAY, REFRACTORY_PERIOD) for g in pop.genomes]
         results = pool.starmap(evaluate_genome, args_list)
         
         fitness_scores = [r[0] for r in results]
@@ -126,7 +124,7 @@ def replay_mode():
         best_genome = pickle.load(f)
 
     # Compile the brain using the current hyperparameters
-    brain = best_genome.build_phenotype(leak_factor=LEAK_FACTOR, threshold=THRESHOLD, max_biological_delay=MAX_BIOLOGICAL_DELAY)
+    brain = best_genome.build_phenotype(leak_factor=LEAK_FACTOR, threshold=THRESHOLD, max_biological_delay=MAX_BIOLOGICAL_DELAY, refractory_period=REFRACTORY_PERIOD)
     sim = SoftBodySimulation()
 
     import pygame
@@ -213,19 +211,160 @@ def replay_mode():
         
     pygame.quit()
 
+def render_mode():
+    try:
+        import cv2
+    except ImportError:
+        print("OpenCV is not installed! Please run: pip install opencv-python")
+        return
+        
+    if not os.path.exists("saved_brains"):
+        print("No 'saved_brains' directory found. You need to train first!")
+        return
+
+    files = [f for f in os.listdir("saved_brains") if f.endswith('.pkl')]
+    if not files:
+        print("No saved brains found. Train first!")
+        return
+
+    print("\nAvailable Generations:")
+    for f in sorted(files, key=lambda x: int(x.split('_')[1].split('.')[0])):
+        print(f" - {f}")
+
+    choice = input("\nEnter the generation number you want to render (e.g., 1): ")
+    
+    if choice.isdigit():
+        choice = f"gen_{choice}.pkl"
+    elif not choice.endswith('.pkl'):
+        choice = f"{choice}.pkl"
+        
+    path = os.path.join("saved_brains", choice)
+
+    if not os.path.exists(path):
+        print("File not found.")
+        return
+        
+    sec_input = input("Enter video length in seconds (default 60): ")
+    try:
+        vid_seconds = int(sec_input)
+    except ValueError:
+        vid_seconds = 60
+
+    with open(path, "rb") as f:
+        best_genome = pickle.load(f)
+
+    # Compile the brain using the current hyperparameters
+    brain = best_genome.build_phenotype(leak_factor=LEAK_FACTOR, threshold=THRESHOLD, max_biological_delay=MAX_BIOLOGICAL_DELAY, refractory_period=REFRACTORY_PERIOD)
+    sim = SoftBodySimulation()
+
+    import pygame
+    pygame.init()
+    screen = pygame.display.set_mode((800, 600))
+    pygame.display.set_caption(f"Rendering: {choice}...")
+
+    SCALE = 50.0
+    OFFSET_X = 100
+    OFFSET_Y = 400
+
+    # --- Pre-calculate SNN visual layout ---
+    node_positions = []
+    num_inputs = len(sim.springs) + 1 # +1 for the Bias Node
+    num_outputs = len(sim.springs)
+    num_hidden = brain.N - num_inputs - num_outputs
+    
+    for i in range(brain.N):
+        if i < num_inputs:
+            x = 250
+            y = 30 + (i + 0.5) * (150.0 / max(1, num_inputs))
+        elif i < num_inputs + num_outputs:
+            out_idx = i - num_inputs
+            x = 550
+            y = 30 + (out_idx + 0.5) * (150.0 / max(1, num_outputs))
+        else:
+            hid_idx = i - num_inputs - num_outputs
+            x = 400 + ((i * 37) % 100) - 50 
+            y = 30 + (hid_idx + 0.5) * (150.0 / max(1, num_hidden))
+        node_positions.append((int(x), int(y)))
+        
+    conns = []
+    for r in range(brain.N):
+        for c in range(brain.N):
+            if brain.weights[r, c] != 0:
+                conns.append((r, c))
+
+    if not os.path.exists("exported_videos"):
+        os.makedirs("exported_videos")
+
+    out_path = f"exported_videos/render_{choice.replace('.pkl', '')}.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fps = int(1.0 / PHYSICS_DT)
+    video = cv2.VideoWriter(out_path, fourcc, float(fps), (800, 600))
+    
+    total_ticks = int(vid_seconds / PHYSICS_DT)
+    print(f"Rendering {vid_seconds} seconds ({total_ticks} frames) to {out_path}...")
+    
+    for tick in range(total_ticks):
+        # 1. Update Physics
+        sim.update(PHYSICS_DT, brain)
+        
+        # 2. Draw
+        screen.fill((20, 20, 20))
+        pygame.draw.line(screen, (100, 255, 100), (0, OFFSET_Y), (800, OFFSET_Y), 2)
+        
+        for spring in sim.springs:
+            x1 = int(spring.m1.x * SCALE + OFFSET_X)
+            y1 = int(spring.m1.y * SCALE + OFFSET_Y)
+            x2 = int(spring.m2.x * SCALE + OFFSET_X)
+            y2 = int(spring.m2.y * SCALE + OFFSET_Y)
+            
+            color = (255, 50, 50) if spring.activation > 0.1 else (200, 200, 200)
+            pygame.draw.line(screen, color, (x1, y1), (x2, y2), 2)
+            
+        for mass in sim.masses:
+            x = int(mass.x * SCALE + OFFSET_X)
+            y = int(mass.y * SCALE + OFFSET_Y)
+            pygame.draw.circle(screen, (100, 150, 255), (x, y), 6)
+            
+        # 3. Draw the Brain
+        for r, c in conns:
+            pygame.draw.line(screen, (60, 60, 60), node_positions[r], node_positions[c], 1)
+            
+        last_spikes = brain.buffer[(brain.time_pointer - 1) % brain.T_max]
+        for i in range(brain.N):
+            color = (50, 255, 50) if last_spikes[i] > 0 else (255, 255, 255)
+            pygame.draw.circle(screen, color, node_positions[i], 4)
+            
+        pygame.display.flip()
+        
+        # --- Capture frame ---
+        frame = pygame.surfarray.array3d(screen)
+        frame = np.transpose(frame, (1, 0, 2))
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        video.write(frame)
+        
+        if tick % fps == 0 and tick > 0:
+            print(f"Rendered {tick // fps} / {vid_seconds} seconds...")
+            
+    video.release()
+    pygame.quit()
+    print(f"Done! Video successfully saved to {out_path}")
+
 if __name__ == '__main__':
     while True:
         print("\n=== SNN Soft-Body Evolution ===")
         print("1. Train New Population")
         print("2. Replay Saved Generation")
-        print("3. Exit")
+        print("3. Render Video (.mp4)")
+        print("4. Exit")
         
-        choice = input("Select an option (1/2/3): ")
+        choice = input("Select an option (1/2/3/4): ")
         if choice == '1':
             train_mode()
         elif choice == '2':
             replay_mode()
         elif choice == '3':
+            render_mode()
+        elif choice == '4':
             sys.exit(0)
         else:
             print("Invalid choice.")

@@ -4,12 +4,14 @@ dt = 0.1
 
 class SpikingNetwork:
 
-    def __init__(self, weights, delays, dt=0.016, leak_factor=0.9, threshold=1.0, max_biological_delay=0.5):
+    def __init__(self, weights, delays, dt=0.016, leak_factor=0.9, threshold=1.0, max_biological_delay=0.5, refractory_period=0.05):
 
         self.weights = weights
         self.delays = delays
         self.leak_factor = leak_factor
         self.threshold = threshold
+        self.dt = dt
+        self.refractory_period = refractory_period
 
         self.N = weights.shape[0] # Number of neurons
 
@@ -21,8 +23,12 @@ class SpikingNetwork:
         
         # Neuron membrane potentials
         self.V = np.zeros(self.N)
+        self.refractory_timer = np.zeros(self.N) # Tracks silence window
 
     def step(self, inputs):
+        
+        # Countdown the refractory timer
+        self.refractory_timer = np.maximum(0.0, self.refractory_timer - self.dt)
 
         self.V *= self.leak_factor
         self.V += inputs
@@ -37,11 +43,15 @@ class SpikingNetwork:
         weighted_spikes = arriving_spikes * self.weights
 
         self.V += np.sum(weighted_spikes, axis = 0)
+        
+        # Enforce Refractory Period (Zero out voltage if neuron is forced to be silent)
+        self.V[self.refractory_timer > 0.0] = 0.0
 
         # Find those that crossed threshold
         spikes = (self.V >= self.threshold).astype(float)
 
         self.V[spikes==1] = 0.0 # Reset any that fire
+        self.refractory_timer[spikes==1] = self.refractory_period # Start the mandatory silence timer
 
         self.buffer[self.time_pointer] = spikes # Save today's spikes
 
