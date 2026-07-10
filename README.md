@@ -45,7 +45,7 @@ After optimization, it will generate an `optuna_results.md` report and optionall
 ### 1. Physics Engine (`physics.py`)
 - **Point Masses & Springs**: The creature is an interconnected mesh of masses and springs.
 - **Muscle Actuation**: When a spring receives a neural spike, its `target_length` instantly contracts to 50% of its rest length. Without a spike, it attempts to return to 100% rest length.
-- **Sensors (Inputs)**: The absolute Y-position (height) of every Point Mass is normalized and fed continuously into the neural network as sensory input, alongside a constant Bias signal of `1.0`.
+- **Sensors (Inputs)**: The percentage deformation of each spring from its rest length is calculated, scaled, and fed continuously into the neural network as sensory input, alongside a constant Bias signal of `10.0`.
 
 ### 2. Spiking Neural Network (`snn.py`)
 - **Leaky Integrate-and-Fire**: Neurons accumulate incoming voltage. If they cross the `THRESHOLD`, they fire a spike (value `1.0`) and reset to `0.0`. Every tick, voltage decays based on the `LEAK_FACTOR`.

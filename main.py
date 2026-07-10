@@ -304,7 +304,7 @@ def render_mode():
     print(f"Rendering {vid_seconds} seconds ({total_ticks} frames) to {out_path}...")
     
     for tick in range(total_ticks):
-        # 1. Update Physics
+        # 1. Update Physics (This automatically steps the brain and gathers sensor data inside physics.py)
         sim.update(PHYSICS_DT, brain)
         
         # 2. Draw
